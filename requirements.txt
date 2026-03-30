@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+tensorflow
+tensorflow-recommenders
+firebase-admin
+numpy
