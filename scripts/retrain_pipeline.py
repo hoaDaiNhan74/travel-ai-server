@@ -67,18 +67,22 @@ class RetrainConfig:
 
     # Firestore
     FIRESTORE_CRED     = ROOT_DIR / "serviceAccountKey.json"
-    INTERACTIONS_COL   = "interactions"   # tên collection trong Firestore
+    INTERACTIONS_COL   = "user_interactions"   # Đổi từ 'interactions' để khớp với Flutter
     DESTINATIONS_COL   = "destinations"   # tên collection destinations
 
     # Dữ liệu huấn luyện
     LOOKBACK_DAYS      = 30      # Lấy dữ liệu 30 ngày gần nhất
     MIN_INTERACTIONS   = 100     # Cần ít nhất N interaction mới bắt đầu retrain
-    INTERACTION_TYPES  = {       # event_type → implicit rating score
-        "view":            1.0,
-        "like":            3.0,
-        "bookmark":        4.0,
-        "trip_generated":  5.0,
+    INTERACTION_TYPES  = {       # event_type → implicit rating score (Đồng bộ với Flutter)
+        "view_detail":       1.0,
+        "view_map":          1.5,
+        "dwell_time":        2.0,
+        "share_destination": 3.0,
+        "add_favorite":      4.0,
+        "rate_destination":  5.0,
+        "plan_trip":         5.0,
     }
+
 
     # Huấn luyện
     FINE_TUNE_EPOCHS   = 7       # Số epochs fine-tune
@@ -160,17 +164,24 @@ def fetch_recent_interactions(
         interactions = []
         for doc in docs:
             data = doc.to_dict()
-            event_type = data.get("eventType", "view")
+            
+            # Bỏ qua các tương tác không gắn với destination cụ thể (search_query, filter_category)
+            dest_id = data.get("destinationId", "")
+            if not dest_id or dest_id == "global":
+                continue
+
+            # Flutter dùng 'interactionType', model cũ dùng 'eventType'
+            event_type = data.get("interactionType") or data.get("eventType") or "view_detail"
             rating = cfg.INTERACTION_TYPES.get(event_type, 1.0)
 
             interactions.append({
                 "user_id":        data.get("userId", ""),
-                "destination_id": data.get("destinationId", ""),
+                "destination_id": dest_id,
                 "event_type":     event_type,
                 "rating":         rating,
             })
 
-        logger.info(f"Fetch thanh cong: {len(interactions)} interactions trong {lookback_days} ngay qua.")
+        logger.info(f"Fetch thanh cong: {len(interactions)} interactions hop le trong {lookback_days} ngay qua.")
         return interactions
 
     except Exception as e:

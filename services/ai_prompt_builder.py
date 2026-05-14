@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 # Import từ package models của triphero_api (đường dẫn đã được cập nhật)
-from models.schemas import TripPlanRequest
+from models.schemas import TripPlanRequest, PackingListRequest
 
 
 class AiPromptBuilder:
@@ -91,7 +91,13 @@ class AiPromptBuilder:
     # 4. BUILD HỆ THỐNG PROMPT TẠO LỊCH TRÌNH
     # ---------------------------------------------------------
     @staticmethod
-    def build_trip_prompt(request: TripPlanRequest, language_code: str = "vi", available_destinations_json: str = "{}") -> str:
+    def build_trip_prompt(
+        request: TripPlanRequest, 
+        language_code: str = "vi", 
+        available_destinations_json: str = "{}",
+        weather_context: str = "",
+        events_context: str = ""
+    ) -> str:
 
         # ── Few-shot JSON schema mẫu (LLM phải bắt chước chính xác) ──────────
         # Quy tắc Emoji được thể hiện ngay trong ví dụ này:
@@ -124,15 +130,33 @@ class AiPromptBuilder:
       "activities": [
         {
           "time": "08:00",
-          "title": "🍜 Thưởng thức bún chả cá đặc sản",
+          "title": "🍜 Ăn sáng đặc sản",
           "destinationId": null,
-          "description": "Bắt đầu ngày mới với tô bún chả cá thơm lừng, món ăn đặc trưng của người Đà Nẵng mà không nơi nào có được. Nước dùng trong vắt được ninh từ xương cá tươi, kết hợp với chả cá chiên vàng ruộm và rau sống địa phương, tạo nên một bữa sáng vừa nhẹ nhàng vừa đậm đà bản sắc miền Trung."
+          "description": "Thưởng thức món ăn đặc trưng của địa phương để bắt đầu ngày mới đầy năng lượng. Hương vị đậm đà cùng cách chế biến truyền thống sẽ mang đến trải nghiệm ẩm thực khó quên ngay từ buổi sáng đầu tiên.",
+          "type": "Indoor",
+          "reasoning": "Thời tiết sáng mát mẻ nhưng bạn muốn dùng bữa trong không gian truyền thống để nạp năng lượng."
+        }
+      ]
+    },
+    {
+      "day": 2,
+      "date": "2025-07-02",
+      "activities": [
+        {
+          "time": "09:00",
+          "title": "🏛️ Tham quan bảo tàng",
+          "destinationId": "museum_id",
+          "description": "Khám phá những hiện vật lịch sử và văn hóa đặc sắc được lưu giữ qua nhiều thế hệ. Đây là cơ hội tuyệt vời để hiểu sâu hơn về cội nguồn và những câu chuyện thú vị đằng sau các di sản quý giá.",
+          "type": "Indoor",
+          "reasoning": "Dự báo có mưa rào nhẹ vào buổi sáng nên ưu tiên các hoạt động trong nhà."
         },
         {
-          "time": "10:00",
-          "title": "🏛️ Khám phá Bảo tàng Điêu khắc Chăm",
-          "destinationId": "cham_museum_danang",
-          "description": "Bảo tàng Điêu khắc Chăm là nơi lưu giữ bộ sưu tập hiện vật Chăm Pa lớn nhất thế giới, được thực dân Pháp xây dựng từ năm 1915. Hơn 300 tác phẩm điêu khắc bằng đá sa thạch từ thế kỷ 7 đến 15 tái hiện sinh động nền văn minh rực rỡ của vương quốc Chăm Pa cổ đại, từ hình tượng thần Shiva, Vishnu đến các vũ nữ Apsara duyên dáng."
+          "time": "19:00",
+          "title": "🎆 Tham gia Lễ hội ánh sáng",
+          "destinationId": "event_square",
+          "description": "Hòa mình vào không khí sôi động của Lễ hội ánh sáng với nhiều tiết mục biểu diễn độc đáo và các gian hàng ẩm thực hấp dẫn.",
+          "type": "Event",
+          "reasoning": "Đang có sự kiện đặc biệt diễn ra tại điểm đến vào đúng thời gian bạn lưu trú."
         }
       ]
     }
@@ -204,10 +228,14 @@ QUY TẮC EMOJI — STRICT (VI PHẠM = LỖI NGHIÊM TRỌNG)
 YÊU CẦU CHẤT LƯỢNG NỘI DUNG — BẮT BUỘC
 ════════════════════════════════════════════════════════
 - "overview": Tối thiểu 4-5 câu, miêu tả sinh động cảnh quan, cảm xúc và điểm nổi bật của chuyến đi.
-- "description" trong mỗi activity: Tối thiểu 3-4 câu, đề cập lịch sử, kiến trúc, văn hóa, hoặc trải nghiệm đặc biệt. Không được liệt kê khô khan.
-- "accommodationSuggestions": Gợi ý 2-3 chỗ lưu trú THỰC TẾ tại địa phương, phù hợp ngân sách, mỗi object có đủ name, type, location, priceRange.
-- "foodRecommendations": 3-5 món ăn địa phương nổi bật, mỗi item bắt đầu bằng emoji thức ăn phù hợp.
-- "additionalTips": 3-5 mẹo thực tế hữu ích, mỗi item bắt đầu bằng emoji phù hợp.
+- "description" trong mỗi activity: Tối thiểu 3-4 câu, đề cập lịch sử, kiến trúc, văn hóa, hoặc trải nghiệm đặc biệt.
+════════════════════════════════════════════════════════
+QUY TẮC LỊCH TRÌNH (DAILY PLAN) — QUAN TRỌNG NHẤT
+════════════════════════════════════════════════════════
+1. Mảng "dailyPlan" BẮT BUỘC phải chứa ĐÚNG {(request.endDate - request.startDate).days + 1} phần tử (tương ứng từ Ngày 1 đến Ngày {(request.endDate - request.startDate).days + 1}).
+2. TUYỆT ĐỐI KHÔNG được tóm tắt, không được bỏ sót bất kỳ ngày nào ở giữa.
+3. Mỗi ngày PHẢI có ít nhất 3-5 hoạt động (Sáng, Trưa, Chiều, Tối).
+4. Nếu chuyến đi dài ngày (ví dụ 9-10 ngày), hãy đảm bảo phân bổ sức lực hợp lý (xen kẽ ngày khám phá mạnh và ngày nghỉ ngơi nhẹ nhàng).
 
 ════════════════════════════════════════════════════════
 SCHEMA JSON MẪU — BẮT CHƯỚC CHÍNH XÁC CẤU TRÚC NÀY
@@ -238,18 +266,26 @@ DỮ LIỆU ĐỊA ĐIỂM (RAG CONTEXT — ƯU TIÊN TUYỆT ĐỐI)
 ════════════════════════════════════════════════════════
 {available_destinations_json}
 
-NGUYÊN TẮC SỬ DỤNG DỮ LIỆU ĐỊA ĐIỂM:
-1. ƯU TIÊN lấy địa điểm từ database trên để lập lịch, không tự bịa đặt.
-2. Nếu activity khớp với địa điểm trong database → gán "destinationId" là "id" chính xác của địa điểm đó.
-3. Nếu không khớp → "destinationId": null.
-4. "mustVisitPlaceIds" BẮT BUỘC xuất hiện trong itinerary.
-5. GOM NHÓM địa điểm gần nhau (dùng lat/lng) vào cùng buổi sáng/chiều để tối ưu lộ trình, tránh đi zigzag.
-6. Tuân thủ tuyệt đối "specialRequirements" nếu có.
+════════════════════════════════════════════════════════
+NGỮ CẢNH THỜI TIẾT & SỰ KIỆN (CONTEXT-AWARE RAG)
+════════════════════════════════════════════════════════
+- Thời tiết: {weather_context if weather_context else 'Không có thông tin dự báo.'}
+- Sự kiện: {events_context if events_context else 'Không có sự kiện đặc biệt nào.'}
+
+NGUYÊN TẮC XỬ LÝ NGỮ CẢNH & DỮ LIỆU:
+1. NẾU dự báo có mưa/nắng gắt → BẮT BUỘC ưu tiên các địa điểm trong nhà (Bảo tàng, Quán cafe, Chùa...) và gán "type": "Indoor".
+2. NẾU thời tiết đẹp → Ưu tiên các hoạt động ngoài trời, dã ngoại, tắm biển... và gán "type": "Outdoor".
+3. NẾU có sự kiện/lễ hội đang diễn ra → Cố gắng chèn sự kiện đó vào lịch trình (phù hợp thời gian) và gán "type": "Event".
+4. NẾU KHÔNG CÓ sự kiện nào được cung cấp trong ngữ cảnh → TUYỆT ĐỐI KHÔNG tự bịa ra các lễ hội/sự kiện ảo.
+5. BẮT BUỘC cung cấp "reasoning" (lý do) cho MỖI hoạt động, giải thích tại sao chọn địa điểm/hoạt động đó dựa trên THỜI TIẾT, SỰ KIỆN hoặc SỞ THÍCH của người dùng.
+6. ƯU TIÊN lấy địa điểm từ database trên để lập lịch, không tự bịa đặt. Gán "destinationId" tương ứng.
+7. "mustVisitPlaceIds" BẮT BUỘC xuất hiện trong itinerary.
+8. Tuân thủ tuyệt đối "specialRequirements" nếu có.
 
 ════════════════════════════════════════════════════════
 DERIVED FIELDS (BẮT BUỘC TÍNH ĐÚNG)
 ════════════════════════════════════════════════════════
-- totalDays   = số ngày từ startDate đến endDate (bao gồm cả 2 đầu)
+- totalDays   = {(request.endDate - request.startDate).days + 1} (Bạn PHẢI tạo lịch trình cho ĐÚNG {(request.endDate - request.startDate).days + 1} ngày)
 - totalPeople = {AiPromptBuilder._get_people_count(request.companions)}
 
 ════════════════════════════════════════════════════════
@@ -261,7 +297,7 @@ QUY TẮC TRƯỜNG "images" (STRICT)
 - Tối thiểu: 1 cảnh thiên nhiên, 1 công trình/kiến trúc, 1 toàn cảnh thành phố.
 - KHÔNG trả về URL, link, hay markdown.
 
-Bây giờ hãy tạo lịch trình cho chuyến đi đến {request.destination}.
+Bây giờ hãy tạo lịch trình ĐẦY ĐỦ cho {(request.endDate - request.startDate).days + 1} NGÀY tại {request.destination}.
 Trả về NGAY JSON object — không có bất kỳ văn bản nào khác.
 """
         return prompt
@@ -308,11 +344,42 @@ Bạn là một Trợ lý Du lịch AI thân thiện và chuyên nghiệp.
 Bạn đang hỗ trợ người dùng trong chuyến đi của họ. Dưới đây là thông tin về chuyến đi hiện tại:
 - Điểm đến: {destination}
 - Ngày đi: {start_date}
-- Ngày về: {end_date}
-- Mô tả tổng quan: {overview}
+        Hãy trả lời các câu hỏi của người dùng ngắn gọn, súc tích, bằng tiếng Việt. Nếu họ hỏi những thứ không liên quan đến du lịch, hãy lịch sự từ chối và hướng họ về chuyến đi.
 
-Hãy trả lời các câu hỏi của người dùng ngắn gọn, súc tích, bằng tiếng Việt. Nếu họ hỏi những thứ không liên quan đến du lịch, hãy lịch sự từ chối và hướng họ về chuyến đi.
-
-Người dùng hỏi: {message}
+        Người dùng hỏi: {message}
         """
         return system_prompt
+
+    # ---------------------------------------------------------
+    # 6. BUILD PROMPT CHO SMART PACKING LIST
+    # ---------------------------------------------------------
+    @staticmethod
+    def build_packing_list_prompt(request: PackingListRequest) -> str:
+        prompt = f"""Bạn là một chuyên gia hậu cần du lịch. Hãy lập danh sách hành lý cho chuyến đi {request.days} ngày đến {request.destination}. Giới tính: {request.gender}.
+Ngữ cảnh: {request.weather_context}
+
+QUY TẮC EMOJI: MỖI danh mục BẮT BUỘC bắt đầu bằng MỘT Emoji phù hợp (VD: '👔 Quần áo'). TUYỆT ĐỐI KHÔNG thêm Emoji vào tên các món đồ bên trong (VD: Chỉ ghi 'Giày thể thao' thay vì '👟 Giày thể thao').
+QUY TẮC SUY LUẬN (REASONING): Nếu món đồ được đề xuất ĐẶC BIỆT dựa trên NGỮ CẢNH (thời tiết hoặc sự kiện), bạn BẮT BUỘC cung cấp "reasoning" giải thích ngắn gọn tại sao. Với các món đồ cơ bản (bàn chải, sạc, áo thun...), để reasoning là null.
+QUY TẮC ĐỊNH DẠNG: BẮT BUỘC trả về JSON thuần túy (Raw JSON). TUYỆT ĐỐI KHÔNG dùng markdown block (như ```json). Không giải thích thêm.
+
+Cấu trúc JSON yêu cầu (Few-shot example):
+{{
+  "categories": [
+    {{
+      "name": "👔 Quần áo",
+      "items": [
+        {{
+          "name": "Áo khoác chống nước",
+          "reasoning": "Dự báo có mưa rào nhẹ vào buổi chiều nên cần áo khoác chống nước."
+        }},
+        {{
+          "name": "Áo thun",
+          "reasoning": null
+        }}
+      ]
+    }}
+  ]
+}}
+
+TRẢ VỀ JSON NGAY BÂY GIỜ:"""
+        return prompt

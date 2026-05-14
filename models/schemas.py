@@ -55,6 +55,10 @@ class TripPlanRequest(BaseModel):
     languageCode: Optional[str] = "vi"
     mustVisitPlaceIds: Optional[List[str]] = Field(default_factory=list)
     specialRequirements: Optional[str] = None
+    
+    # ── Thông tin người tạo (dùng để hiển thị trong Group Trips) ──
+    ownerName: Optional[str] = None
+    ownerPhoto: Optional[str] = None
 
     @model_validator(mode="after")
     def _sync_user_id_fields(self) -> "TripPlanRequest":
@@ -82,6 +86,8 @@ class TravelDbModel(BaseModel):
     userId: str
     createdAt: datetime
     updatedAt: Optional[datetime] = None
+    memberIds: List[str] = Field(default_factory=list)
+    shareCode: Optional[str] = None
     destination: str
     destinationLowerCase: str
 
@@ -110,6 +116,7 @@ class TravelDbModel(BaseModel):
 
     foodRecommendations: List[str] = Field(default_factory=list)
     additionalTips: List[str] = Field(default_factory=list)
+    packingList: List[Dict[str, Any]] = Field(default_factory=list)
 
     budget: Optional[str] = None
     budgetType: Optional[str] = None
@@ -128,6 +135,10 @@ class TravelDbModel(BaseModel):
     status: str
 
     visitedAt: Optional[datetime] = None
+    
+    # ── Thông tin định danh chủ sở hữu ──
+    ownerName: Optional[str] = None
+    ownerPhoto: Optional[str] = None
 
     model_config = {
         "populate_by_name": True,
@@ -142,3 +153,23 @@ class StandardResponse(BaseModel):
     status: str  # Ví dụ: "success" hoặc "error"
     data: Optional[Dict[str, Any]] = None
     message: Optional[str] = None
+
+# ==========================================
+# 5. SCHEMA CHO SMART PACKING LIST
+# ==========================================
+
+class PackingListRequest(BaseModel):
+    destination: str
+    days: int
+    startDate: Optional[datetime] = None
+    endDate: Optional[datetime] = None
+    weather_context: Optional[str] = "bình thường"
+    gender: Optional[str] = "unisex"
+
+# ==========================================
+# 6. SCHEMA CHO CO-OP PLANNING
+# ==========================================
+
+class JoinTripRequest(BaseModel):
+    share_code: str
+    user_id: str

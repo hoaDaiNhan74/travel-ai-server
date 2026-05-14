@@ -2,15 +2,19 @@ import os
 import json
 import asyncio
 import httpx
+from datetime import datetime
 import re
 import logging
 import tensorflow as tf
 from fastapi import HTTPException
 from groq import AsyncGroq
-from typing import List, Dict, Any, Optional
+from firebase_admin import firestore
+from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
+import random
+import string
 
-from models.schemas import TripPlanRequest, ChatRequest
+from models.schemas import TripPlanRequest, ChatRequest, PackingListRequest
 from .ai_prompt_builder import AiPromptBuilder
 
 # Load environment variables
@@ -64,6 +68,11 @@ class AiService:
         self._tf_model = loaded_model
         self._db = db
         logger.info("✅ AiService: TF Model và Firestore DB đã được inject thành công.")
+
+    def generate_share_code(self, length: int = 6) -> str:
+        """Sinh mã chia sẻ ngẫu nhiên gồm chữ hoa và số."""
+        chars = string.ascii_uppercase + string.digits
+        return ''.join(random.choice(chars) for _ in range(length))
 
     # ─── Unsplash Image Fetching ──────────────────────────────────────────────────
 
@@ -139,7 +148,7 @@ class AiService:
                 response = await self.client.chat.completions.create(
                     model=self.model_id,
                     messages=messages,
-                    temperature=0.85,
+                    temperature=0.7,
                     max_tokens=6000,
                     response_format={"type": "json_object"} if is_json else None
                 )
@@ -344,6 +353,26 @@ class AiService:
     Nếu < ngưỡng này → kích hoạt Cold Start fallback (dùng Trending).
     """
 
+    async def fetch_weather_context(self, destination: str, start_date: datetime, end_date: datetime) -> str:
+        """
+        [PLACEHOLDER] Hàm giả lập lấy dự báo thời tiết.
+        Sau này có thể kết nối với OpenWeatherMap API.
+        """
+        # Giả lập delay mạng
+        await asyncio.sleep(0.5)
+        # Giả lập thời tiết ngẫu nhiên hoặc cứng
+        return f"Dự báo thời tiết tại {destination} từ {start_date.strftime('%d/%m')} đến {end_date.strftime('%d/%m')}: Ban ngày trời nắng đẹp, nhiệt độ 28-32 độ C. Buổi chiều tối có thể có mưa rào nhẹ. Khuyên dùng trang phục thoáng mát và mang theo ô."
+
+    async def fetch_events_context(self, destination: str, start_date: datetime, end_date: datetime) -> str:
+        """
+        [PLACEHOLDER] Hàm giả lập lấy sự kiện/lễ hội đang diễn ra.
+        Sau này có thể kết nối với Ticketmaster hoặc Eventbrite API.
+        """
+        # Giả lập delay mạng
+        await asyncio.sleep(0.5)
+        # Giả lập sự kiện
+        return f"Sự kiện nổi bật tại {destination}: Lễ hội ẩm thực đường phố đang diễn ra tại trung tâm thành phố vào các buổi tối cuối tuần. Tuần lễ nghệ thuật đương đại mở cửa miễn phí từ 9h-17h hàng ngày."
+
     async def generate_trip(self, request: TripPlanRequest) -> Dict[str, Any]:
         """
         Sinh lịch trình du lịch AI cá nhân hóa dùng Groq (Llama-3).
@@ -371,53 +400,46 @@ class AiService:
         """
         try:
             # ═══════════════════════════════════════════════════════
-            # BƯỚC 1: PHÂN LOẠI NGƯỜI DÙNG & CHỌN NGUỒN RAG
+            # BƯỚC 1: PHÂN LOẠI NGƯỜI DÙNG & FETCH DỮ LIỆU SONG SONG
             # ═══════════════════════════════════════════════════════
             user_id = request.user_id or request.userId  # hỗ trợ cả 2 naming convention
             rag_source_label: str  # dùng cho logging
             raw_places: List[Dict[str, Any]]
 
-            if user_id:
-                # ── Thử lấy personalized recommendations từ Two-Tower ──
-                logger.info(f"🔍 RAG: Đang lấy personalized places cho user '{user_id}'...")
-                try:
-                    raw_places = await self.get_personalized_places(user_id)
-                except Exception as rec_err:
-                    logger.warning(f"⚠️ Recommendation engine lỗi: {rec_err}. Kích hoạt Cold Start.")
-                    raw_places = []
-
-                if len(raw_places) >= self._COLD_START_THRESHOLD:
-                    # ── [NHÁNH 1] PERSONALIZED ──
-                    rag_source_label = "PERSONALIZED"
-                    logger.info(
-                        f"🎯 [PERSONALIZED] user='{user_id}' | "
-                        f"{len(raw_places)} địa điểm từ Two-Tower Model."
-                    )
+            # Chuẩn bị tasks context
+            weather_task = self.fetch_weather_context(request.destination, request.startDate, request.endDate)
+            events_task = self.fetch_events_context(request.destination, request.startDate, request.endDate)
+            
+            # Hàm phụ để xử lý logic lấy địa điểm (tránh block các tác vụ khác)
+            async def fetch_places_logic() -> Tuple[List[Dict[str, Any]], str]:
+                if user_id:
+                    logger.info(f"🔍 RAG: Đang lấy personalized places cho user '{user_id}'...")
+                    try:
+                        places = await self.get_personalized_places(user_id)
+                        if len(places) >= self._COLD_START_THRESHOLD:
+                            return places, "PERSONALIZED"
+                        else:
+                            logger.warning(f"🧊 [COLD START] user='{user_id}'. Fallback → get_trending_places()")
+                            places = await self.get_trending_places(limit=20)
+                            return places, "COLD START"
+                    except Exception as rec_err:
+                        logger.warning(f"⚠️ Recommendation engine lỗi: {rec_err}. Kích hoạt Cold Start.")
+                        places = await self.get_trending_places(limit=20)
+                        return places, "COLD START"
                 else:
-                    # ── [NHÁNH 2] COLD START ──
-                    cold_reason = (
-                        f"Two-Tower chỉ trả về {len(raw_places)} địa điểm "
-                        f"(ngưỡng tối thiểu: {self._COLD_START_THRESHOLD})"
-                    )
-                    rag_source_label = "COLD START"
-                    logger.warning(
-                        f"🧊 [COLD START] user='{user_id}' | {cold_reason}. "
-                        f"Fallback → get_trending_places()"
-                    )
-                    raw_places = await self.get_trending_places(limit=20)
-            else:
-                # ── [NHÁNH 3] ANONYMOUS ──
-                rag_source_label = "ANONYMOUS"
-                logger.info(
-                    "👤 [ANONYMOUS] Không có user_id. "
-                    "Sử dụng Trending Places làm RAG context."
-                )
-                raw_places = await self.get_trending_places(limit=20)
+                    logger.info("👤 [ANONYMOUS] Không có user_id. Sử dụng Trending Places làm RAG context.")
+                    places = await self.get_trending_places(limit=20)
+                    return places, "ANONYMOUS"
+
+            # Thực thi song song cả 3 tác vụ bằng asyncio.gather
+            (raw_places, rag_source_label), weather_context, events_context = await asyncio.gather(
+                fetch_places_logic(),
+                weather_task,
+                events_task
+            )
 
             # ═══════════════════════════════════════════════════════
             # BƯỚC 2: XÂY DỰNG RAG CONTEXT
-            # AiPromptBuilder tự filter theo province của request.destination
-            # và serialize thành JSON string để bơm vào prompt.
             # ═══════════════════════════════════════════════════════
             rag_context: str = AiPromptBuilder.prepare_optimal_rag_context(request, raw_places)
             logger.info(
@@ -431,7 +453,9 @@ class AiService:
             prompt = AiPromptBuilder.build_trip_prompt(
                 request=request,
                 language_code=request.languageCode or "vi",
-                available_destinations_json=rag_context
+                available_destinations_json=rag_context,
+                weather_context=weather_context,
+                events_context=events_context
             )
 
             content = await self._call_ai_core(prompt, is_json=True)
@@ -464,6 +488,8 @@ class AiService:
             trip_data["images"] = image_urls
             trip_data["language"] = request.languageCode or "vi"
             trip_data["generatedByAi"] = True
+            trip_data["startDate"] = request.startDate
+            trip_data["endDate"] = request.endDate
             # Ghi nhận nguồn RAG vào response để frontend/logging có thể theo dõi
             trip_data["_ragSource"] = rag_source_label
 
@@ -519,3 +545,145 @@ class AiService:
         except Exception as e:
             logger.error(f"--- LỖI HỆ THỐNG AI (CHAT) --- {e}")
             raise HTTPException(status_code=500, detail="Không thể gửi tin nhắn lúc này.")
+
+    async def save_trip_to_db(self, trip_data: Dict[str, Any], user_id: Optional[str] = None, owner_name: Optional[str] = None, owner_photo: Optional[str] = None) -> str:
+        """
+        Lưu thông tin chuyến đi vào Firestore (BẮT BUỘC lưu kể cả anonymous).
+        """
+        if not self._db:
+            logger.warning("⚠️ Firestore DB không khả dụng. Không thể lưu chuyến đi.")
+            return ""
+
+        try:
+            target_user_id = user_id or "anonymous"
+            
+            # 1. Chuẩn hóa Packing List
+            ai_packing_list = trip_data.get("packingList", [])
+            formatted_packing_list = []
+
+            for cat in ai_packing_list:
+                items = cat.get("items", [])
+                formatted_items = []
+                for item in items:
+                    if isinstance(item, str):
+                        formatted_items.append({"name": item, "is_checked": False})
+                    else:
+                        formatted_items.append(item)
+                
+                formatted_packing_list.append({
+                    "name": cat.get("name", ""),
+                    "items": formatted_items
+                })
+
+            # 2. Xây dựng data (Lazy loading: khởi tạo packing_list rỗng)
+            share_code = self.generate_share_code()
+            persistence_data = {
+                "userId": target_user_id,
+                "member_ids": [target_user_id],
+                "share_code": share_code,
+                "ownerName": owner_name,
+                "ownerPhoto": owner_photo,
+                "destination": trip_data.get("destination", ""),
+                "destinationLat": trip_data.get("destinationLat", 0.0),
+                "destinationLng": trip_data.get("destinationLng", 0.0),
+                "currentLat": trip_data.get("currentLat", 0.0),
+                "currentLng": trip_data.get("currentLng", 0.0),
+                "startDate": trip_data.get("startDate"),
+                "endDate": trip_data.get("endDate"),
+                "dailyPlan": trip_data.get("dailyPlan", []),
+                "packing_list": [],
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "overview": trip_data.get("overview", ""),
+                "tripType": trip_data.get("tripType", ""),
+                "totalDays": trip_data.get("totalDays", 0),
+                "totalPeople": trip_data.get("totalPeople", 1),
+                "budget": trip_data.get("budget", ""),
+                "images": trip_data.get("images", []),
+                "accommodationSuggestions": trip_data.get("accommodationSuggestions", []),
+                "transportationDetails": trip_data.get("transportationDetails", {}),
+                "foodRecommendations": trip_data.get("foodRecommendations", []),
+                "additionalTips": trip_data.get("additionalTips", []),
+                "generatedByAi": True,
+                "status": "planned",
+                "language": trip_data.get("language", "vi"),
+            }
+
+            # 3. Lưu vào Firestore dùng add()
+            # doc_ref là tuple (update_time, document_reference)
+            doc_ref = self._db.collection("trips").add(persistence_data)
+            trip_id = doc_ref[1].id
+            
+            logger.info(f"✅ Đã lưu chuyến đi (ShareCode: {share_code}) với ID: {trip_id}")
+            
+            # Cập nhật ngược lại vào trip_data để trả về API
+            trip_data["trip_id"] = trip_id
+            trip_data["share_code"] = share_code
+            trip_data["member_ids"] = [target_user_id]
+            trip_data["packing_list"] = formatted_packing_list
+            
+            return trip_id
+
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi lưu chuyến đi vào Firestore: {e}")
+            return ""
+
+    async def generate_packing_list(self, request: PackingListRequest) -> dict:
+        """Sinh danh sách hành lý thông minh dùng Groq."""
+        try:
+            # 1. Fetch ngữ cảnh (Thời tiết & Sự kiện) nếu có ngày tháng
+            if request.startDate and request.endDate:
+                logger.info(f"⛅ Đang lấy bối cảnh thời tiết và sự kiện cho hành lý tại {request.destination}...")
+                weather_task = self.fetch_weather_context(request.destination, request.startDate, request.endDate)
+                events_task = self.fetch_events_context(request.destination, request.startDate, request.endDate)
+                weather_context, events_context = await asyncio.gather(weather_task, events_task)
+                
+                # Ghi đè biến weather_context trong request để gửi cho Prompt
+                request.weather_context = f"Thời tiết: {weather_context}\nSự kiện: {events_context}"
+            else:
+                request.weather_context = "Không có thông tin dự báo."
+
+            # 2. Lấy prompt
+            prompt = AiPromptBuilder.build_packing_list_prompt(request)
+            
+            # 2. Gọi Groq API qua _call_ai_core
+            content = await self._call_ai_core(prompt, is_json=True)
+            
+            if not content:
+                raise ValueError("Groq returned empty response.")
+                
+            # 3. Làm sạch dữ liệu (Post-processing)
+            cleaned_text = self._clean_json_response(content)
+            
+            # 4. Parse JSON
+            packing_list = json.loads(cleaned_text)
+            return packing_list
+            
+        except (json.JSONDecodeError, ValueError) as parse_err:
+            logger.error(f"❌ Lỗi Parse JSON Packing List: {parse_err}")
+            # Fallback an toàn khi parse JSON lỗi
+            return {
+                "categories": [
+                    {
+                        "name": "🎒 Đồ dùng mặc định",
+                        "items": [
+                            {"name": "Quần áo cơ bản", "reasoning": None},
+                            {"name": "Đồ vệ sinh cá nhân", "reasoning": None},
+                            {"name": "Sạc điện thoại", "reasoning": None},
+                            {"name": "Giấy tờ tùy thân", "reasoning": None}
+                        ]
+                    }
+                ]
+            }
+        except Exception as e:
+            logger.error(f"--- LỖI HỆ THỐNG AI (PACKING LIST) --- {e}")
+            # Fallback an toàn khi gọi API lỗi
+            return {
+                "categories": [
+                    {
+                        "name": "⚠️ Lỗi hệ thống",
+                        "items": [
+                            {"name": "Hãy mang theo hành lý cơ bản vì chúng tôi không thể lấy gợi ý lúc này.", "reasoning": None}
+                        ]
+                    }
+                ]
+            }

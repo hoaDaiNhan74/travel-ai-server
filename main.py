@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 from services.ai_service import AiService
 from models.schemas import TripPlanRequest, ChatRequest, StandardResponse
 
+# ─── Import Routers ───────────────────────────────────────────────────────────
+from routers import ai_router, trip_router
+
 # ─── Global State ────────────────────────────────────────────────────────────
 loaded_model = None
 db = None
@@ -130,6 +133,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── Register Routers ─────────────────────────────────────────────────────────
+app.include_router(ai_router.router, prefix="/api/v1/ai", tags=["AI Extra Features"])
+app.include_router(trip_router.router, prefix="/api/v1/trips", tags=["Trip Management"])
+
 
 # ════════════════════════════════════════════════════════════════════════════════
 # ─── SECTION 1: Root & Health Endpoints ───────────────────────────────────────
@@ -220,72 +227,6 @@ async def get_recommendations_legacy(user_id: str):
     """Legacy endpoint kept for backward compatibility with older Flutter clients."""
     return await get_recommendations(user_id)
 
-
-# ════════════════════════════════════════════════════════════════════════════════
-# ─── SECTION 3: AI Trip Planner Endpoints (Groq / Llama-3) ───────────────────
-# ════════════════════════════════════════════════════════════════════════════════
-
-@app.post("/api/v1/trips/generate", response_model=StandardResponse, tags=["AI Trip Planner"])
-async def generate_trip(request: TripPlanRequest):
-    """
-    Tạo lịch trình du lịch AI cá nhân hóa dùng Groq (Llama-3).
-    
-    [INTERNAL WIRING FLOW]
-    Nếu userId được cung cấp trong request:
-      1. AiService gọi Two-Tower model lấy danh sách địa điểm yêu thích của user.
-      2. Danh sách này được chèn vào RAG context của AiPromptBuilder.
-      3. Groq (Llama-3) tạo lịch trình dựa trên sở thích cá nhân hóa.
-    """
-    logger.info(f"📥 Đang xử lý yêu cầu lập lịch trình đến: {request.destination} | user: {request.userId or 'anonymous'}")
-    try:
-        trip_data = await ai_service.generate_trip(request)
-
-        return StandardResponse(
-            status="success",
-            message="Lập kế hoạch thành công!",
-            data=trip_data
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Lỗi khi lập lịch trình: {e}")
-        traceback.print_exc()
-        return StandardResponse(
-            status="error",
-            message=f"Không thể lập lịch trình: {str(e)}",
-            data=None
-        )
-
-
-@app.post("/api/v1/trips/regenerate", response_model=StandardResponse, tags=["AI Trip Planner"])
-async def regenerate_trip(payload: Dict[str, Any]):
-    """
-    Hỗ trợ dịch chuyển hoặc tạo lại lịch trình dựa trên dữ liệu cũ.
-    """
-    logger.info("🔄 Nhận yêu cầu tạo lại/dịch chuyển lịch trình")
-    try:
-        trip_data = payload.get("trip_data")
-        language_code = payload.get("languageCode", "vi")
-
-        if not trip_data:
-            raise HTTPException(status_code=400, detail="Thiếu dữ liệu trip_data để thực hiện.")
-
-        new_trip = await ai_service.regenerate_trip(trip_data, language_code)
-
-        return StandardResponse(
-            status="success",
-            message=f"Đã dịch chuyển lịch trình sang {language_code}",
-            data=new_trip
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Lỗi khi regenerate: {e}")
-        return StandardResponse(
-            status="error",
-            message=str(e),
-            data=None
-        )
 
 
 # ════════════════════════════════════════════════════════════════════════════════
