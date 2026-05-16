@@ -2,8 +2,9 @@ import os
 import tensorflow as tf
 import firebase_admin
 from firebase_admin import credentials, firestore
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any
@@ -132,6 +133,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── Static Files (For Image Uploads) ─────────────────────────────────────────
+UPLOAD_DIR = "uploads"
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # ─── Register Routers ─────────────────────────────────────────────────────────
 app.include_router(ai_router.router, prefix="/api/v1/ai", tags=["AI Extra Features"])
@@ -305,6 +313,37 @@ async def get_scheduler_status():
         "model_path":      "two_tower_model/",
         "model_loaded":    loaded_model is not None,
     }
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ─── SECTION 6: File Upload Endpoints ─────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/upload", tags=["Files"])
+async def upload_file(file: UploadFile = File(...)):
+    """
+    Tải file lên server và trả về URL truy cập.
+    Lưu ý: Trong môi trường thực tế, bạn nên giới hạn loại file và dung lượng.
+    """
+    try:
+        import uuid
+        file_extension = os.path.splitext(file.filename)[1]
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+
+        # Trả về URL tương đối hoặc tuyệt đối
+        # Lưu ý: Thay đổi localhost thành IP của máy nếu test trên điện thoại thật
+        return {
+            "status": "success",
+            "filename": unique_filename,
+            "url": f"/uploads/{unique_filename}"
+        }
+    except Exception as e:
+        logger.error(f"❌ Upload failed: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
