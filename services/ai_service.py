@@ -592,7 +592,7 @@ class AiService:
                 "endDate": trip_data.get("endDate"),
                 "dailyPlan": trip_data.get("dailyPlan", []),
                 "packing_list": [],
-                "created_at": firestore.SERVER_TIMESTAMP,
+                "createdAt": firestore.SERVER_TIMESTAMP,
                 "overview": trip_data.get("overview", ""),
                 "tripType": trip_data.get("tripType", ""),
                 "totalDays": trip_data.get("totalDays", 0),

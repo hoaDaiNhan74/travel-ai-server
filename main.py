@@ -92,26 +92,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"\u274c Firebase initialization failed: {e}")
 
-    # 3. [INTERNAL WIRING] Inject TF model + Firestore DB v\u00e0o AiService
+    # 3. [INTERNAL WIRING] Inject TF model + Firestore DB vào AiService
     ai_service.set_dependencies(loaded_model=loaded_model, db=db)
-    logger.info("\U0001f517 Internal Wiring: AiService \u0111\u00e3 \u0111\u01b0\u1ee3c k\u1ebft n\u1ed1i v\u1edbi Recommendation Engine & Firestore.")
+    logger.info("🔗 Internal Wiring: AiService đã được kết nối với Recommendation Engine & Firestore.")
 
-    # 4. [SCHEDULER] Kh\u1edfi \u0111\u1ed9ng APScheduler background
-    # Sau m\u1ed7i l\u1ea7n retrain th\u00e0nh c\u00f4ng, _reload_model_after_retrain() s\u1ebd t\u1ef1 \u0111\u1ed9ng
-    # n\u1ea1p l\u1ea1i model m\u1edbi v\u00e0o RAM m\u00e0 kh\u00f4ng c\u1ea7n restart server.
-    try:
-        retrain_scheduler = start_background_scheduler()
-        logger.info("\u23f0 Retrain Scheduler kh\u1edfi \u0111\u1ed9ng (Chu Nhat 02:00 AM).")
-    except Exception as e:
-        logger.warning(f"\u26a0\ufe0f Kh\u00f4ng th\u1ec3 kh\u1edfi \u0111\u1ed9ng scheduler: {e}")
+    # [SCHEDULER] ĐÃ BỊ TẮT ĐỂ TIẾT KIỆM RAM TRÊN RENDER FREE-TIER
+    # Bạn sẽ chạy script huấn luyện cục bộ (local) và đẩy model lên GitHub.
+    logger.info("⏸️ Retrain Scheduler đã được tắt. Hãy chạy thủ công ở máy local.")
 
     yield
 
     # ─── Shutdown ─────────────────────────────────────────────────────────────
-    logger.info("\U0001f534 Server shutting down...")
-    if retrain_scheduler and retrain_scheduler.running:
-        retrain_scheduler.shutdown(wait=False)
-        logger.info("Scheduler \u0111\u00e3 d\u1eebng.")
+    logger.info("🔴 Server shutting down...")
 
 
 # ─── App Initialization ────────────────────────────────────────────────────────
