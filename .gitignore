@@ -4,3 +4,4 @@ __pycache__/
 serviceAccountKey.json
 logs/
 venv/
+uploads/

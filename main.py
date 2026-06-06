@@ -30,7 +30,7 @@ from services.ai_service import AiService
 from models.schemas import TripPlanRequest, ChatRequest, StandardResponse
 
 # ─── Import Routers ───────────────────────────────────────────────────────────
-from routers import ai_router, trip_router
+from routers import ai_router, trip_router, analytics_router
 
 # ─── Global State ────────────────────────────────────────────────────────────
 loaded_model = None
@@ -136,6 +136,7 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 # ─── Register Routers ─────────────────────────────────────────────────────────
 app.include_router(ai_router.router, prefix="/api/v1/ai", tags=["AI Extra Features"])
 app.include_router(trip_router.router, prefix="/api/v1/trips", tags=["Trip Management"])
+app.include_router(analytics_router.router, prefix="/api/v1/analytics", tags=["Analytics & ML"])
 
 
 # ════════════════════════════════════════════════════════════════════════════════
