@@ -173,3 +173,12 @@ class PackingListRequest(BaseModel):
 class JoinTripRequest(BaseModel):
     share_code: str
     user_id: str
+
+# ==========================================
+# 7. SCHEMA CHO COLD START PREFERENCES
+# ==========================================
+
+class UserPreferencesRequest(BaseModel):
+    user_id: str
+    interests: List[str]
+

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # ─── Import AI Services & Schemas ────────────────────────────────────────────
 from services.ai_service import AiService
-from models.schemas import TripPlanRequest, ChatRequest, StandardResponse
+from models.schemas import TripPlanRequest, ChatRequest, StandardResponse, UserPreferencesRequest
 
 # ─── Import Routers ───────────────────────────────────────────────────────────
 from routers import ai_router, trip_router, analytics_router
@@ -227,6 +227,48 @@ async def get_recommendations(user_id: str):
 async def get_recommendations_legacy(user_id: str):
     """Legacy endpoint kept for backward compatibility with older Flutter clients."""
     return await get_recommendations(user_id)
+
+
+@app.post(
+    "/api/v1/user/preferences",
+    response_model=StandardResponse,
+    tags=["User Preferences"],
+)
+async def save_user_preferences(request: UserPreferencesRequest):
+    """
+    Lưu sở thích người dùng để xử lý Cold Start (đồng bộ với Firestore).
+    """
+    if db is None:
+        raise HTTPException(status_code=500, detail="Firestore không khả dụng")
+    try:
+        # Chuyển đổi interests list thành map cho preferences field của Firestore
+        preferences_map = {}
+        for item in request.interests:
+            if item in ['Một mình', 'Cặp đôi', 'Gia đình', 'Nhóm bạn', '$', '$$', '$$$']:
+                preferences_map[item] = 2.0
+            else:
+                preferences_map[item] = 1.5
+        
+        # Cập nhật Firestore document 'user_profiles/{user_id}'
+        user_profile_ref = db.collection("user_profiles").document(request.user_id)
+        user_profile_ref.set({
+            "preferences": preferences_map,
+            "updatedAt": firestore.SERVER_TIMESTAMP
+        }, merge=True)
+        
+        logger.info(f"✅ Đã đồng bộ user preferences lên Firestore cho user: {request.user_id}")
+        return StandardResponse(
+            status="success",
+            message="Đã lưu sở thích người dùng thành công",
+            data={"preferences": preferences_map}
+        )
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi lưu sở thích người dùng: {e}")
+        return StandardResponse(
+            status="error",
+            message=f"Không thể lưu sở thích: {str(e)}",
+            data=None
+        )
 
 
 
