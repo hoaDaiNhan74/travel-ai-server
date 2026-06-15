@@ -125,7 +125,8 @@ class AiService:
         self,
         prompt: str,
         is_json: bool = True,
-        chat_history: Optional[List[Dict[str, str]]] = None
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        model_id: Optional[str] = None
     ) -> str:
         """Hàm trung tâm gọi Groq API với cơ chế AUTO-RETRY."""
         if not self.client:
@@ -133,6 +134,7 @@ class AiService:
 
         max_retries = 3
         delay_seconds = 2
+        selected_model = model_id or self.model_id
 
         # Chuẩn bị messages
         messages = []
@@ -143,13 +145,13 @@ class AiService:
 
         for attempt in range(max_retries):
             try:
-                logger.info(f"🤖 Đang gọi Groq model: {self.model_id} (Lần thử {attempt + 1}/{max_retries})...")
+                logger.info(f"🤖 Đang gọi Groq model: {selected_model} (Lần thử {attempt + 1}/{max_retries})...")
 
                 response = await self.client.chat.completions.create(
-                    model=self.model_id,
+                    model=selected_model,
                     messages=messages,
                     temperature=0.7,
-                    max_tokens=6000,
+                    max_tokens=6000 if selected_model == self.model_id else 2000,
                     response_format={"type": "json_object"} if is_json else None
                 )
 
@@ -536,7 +538,8 @@ class AiService:
                 role = "user" if msg.sender == "user" else "assistant"
                 history.append({"role": role, "content": msg.text})
 
-            reply = await self._call_ai_core(user_input, is_json=False, chat_history=history)
+            # Gọi AI dùng model 8b siêu nhanh
+            reply = await self._call_ai_core(user_input, is_json=False, chat_history=history, model_id="llama-3.1-8b-instant")
 
             return reply
 
@@ -645,8 +648,8 @@ class AiService:
             # 2. Lấy prompt
             prompt = AiPromptBuilder.build_packing_list_prompt(request)
             
-            # 2. Gọi Groq API qua _call_ai_core
-            content = await self._call_ai_core(prompt, is_json=True)
+            # 2. Gọi Groq API qua _call_ai_core dùng model 8b siêu nhanh
+            content = await self._call_ai_core(prompt, is_json=True, model_id="llama-3.1-8b-instant")
             
             if not content:
                 raise ValueError("Groq returned empty response.")
