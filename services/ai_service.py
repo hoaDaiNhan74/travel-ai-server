@@ -307,6 +307,120 @@ class AiService:
             logger.error(f"❌ Lỗi khi lấy personalized places cho user '{user_id}': {e}")
             return []
 
+    async def get_cold_start_places(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        [COLD START ENGINE]
+        Lấy danh sách địa điểm cá nhân hóa dựa trên sở thích đã chọn của người dùng lúc đăng ký
+        (trong collection `user_profiles/{user_id}`).
+        """
+        if not self._db:
+            logger.warning("⚠️ Firestore DB chưa kết nối. get_cold_start_places() fallback sang get_trending_places().")
+            return await self.get_trending_places(limit=limit)
+
+        try:
+            # 1. Truy vấn sở thích người dùng từ Firestore (đồng bộ)
+            profile_doc = self._db.collection("user_profiles").document(user_id).get()
+            if not profile_doc.exists:
+                logger.info(f"🧊 Không tìm thấy profile cho user '{user_id}'. Fallback sang get_trending_places().")
+                return await self.get_trending_places(limit=limit)
+
+            profile_data = profile_doc.to_dict()
+            preferences = profile_data.get("preferences", {})
+            if not preferences:
+                logger.info(f"🧊 User '{user_id}' không có preferences. Fallback sang get_trending_places().")
+                return await self.get_trending_places(limit=limit)
+
+            logger.info(f"🎯 Đang tính toán Cold Start places dựa trên preferences của user '{user_id}': {list(preferences.keys())}")
+
+            # 2. Lấy một pool các địa điểm phổ biến để chấm điểm (ví dụ: top 60)
+            pool_docs = (
+                self._db.collection("destinations")
+                .order_by("trendingScore", direction="DESCENDING")
+                .limit(60)
+                .stream()
+            )
+            pool_places = [{"id": doc.id, **doc.to_dict()} for doc in pool_docs]
+            if not pool_places:
+                # Fallback nếu không sort được
+                pool_docs = self._db.collection("destinations").limit(60).stream()
+                pool_places = [{"id": doc.id, **doc.to_dict()} for doc in pool_docs]
+
+            # Bản đồ ánh xạ từ key của preferences sang các từ khóa tìm kiếm trong category/tags
+            interest_keywords = {
+                'Biển đảo': ['biển', 'đảo', 'vịnh', 'bãi tắm', 'bãi biển', 'sea', 'beach'],
+                'Leo núi': ['núi', 'leo núi', 'trekking', 'mountain', 'climb'],
+                'Ẩm thực': ['ẩm thực', 'ăn uống', 'quán', 'nhà hàng', 'chợ', 'food', 'eat'],
+                'Văn hóa': ['văn hóa', 'truyền thống', 'nghệ thuật', 'làng nghề', 'culture'],
+                'Cắm trại': ['cắm trại', 'camping', 'dã ngoại'],
+                'Nghỉ dưỡng': ['nghỉ dưỡng', 'resort', 'spa', 'khách sạn', 'luxury'],
+                'Mạo hiểm': ['mạo hiểm', 'adventure', 'khám phá', 'thác', 'hang động', 'cave'],
+                'Chụp ảnh': ['chụp ảnh', 'check-in', 'view đẹp', 'sống ảo', 'photo'],
+                'Lịch sử': ['lịch sử', 'di tích', 'cổ kính', 'bảo tàng', 'history'],
+                'Mua sắm': ['mua sắm', 'chợ', 'mall', 'shopping'],
+                'Tâm linh': ['tâm linh', 'chùa', 'đền', 'nhà thờ', 'miếu', 'pagoda', 'temple'],
+                'Sinh thái': ['sinh thái', 'thiên nhiên', 'rừng', 'vườn', 'nature'],
+                'Lễ hội': ['lễ hội', 'festival', 'sự kiện', 'event'],
+                'Thể thao': ['thể thao', 'sport', 'hoạt động'],
+                'Sông nước': ['sông nước', 'sông', 'hồ', 'suối', 'chèo thuyền', 'river', 'lake'],
+                'Vườn quốc gia': ['vườn quốc gia', 'rừng', 'bảo tồn', 'national park']
+            }
+
+            scored_places = []
+            for place in pool_places:
+                # Điểm cơ bản dựa trên trendingScore
+                trending_score = float(place.get("trendingScore", 0.0))
+                rating = float(place.get("averageRating" if "averageRating" in place else "rating", 0.0))
+                
+                # Normalize trending score và rating thành một base score
+                base_score = (trending_score * 0.1) + (rating * 2.0)
+                
+                match_score = 0.0
+                place_category = str(place.get("category", "")).lower()
+                place_tags = str(place.get("tags", "")).lower()
+
+                # Cộng điểm dựa trên mức độ phù hợp với sở thích của người dùng
+                for pref_key, weight in preferences.items():
+                    weight_val = float(weight)
+                    
+                    # 1. Kiểm tra nếu là sở thích
+                    if pref_key in interest_keywords:
+                        keywords = interest_keywords[pref_key]
+                        # Nếu category chứa bất kỳ từ khóa nào
+                        if any(kw in place_category for kw in keywords):
+                            match_score += weight_val * 20.0
+                        # Nếu tags chứa bất kỳ từ khóa nào
+                        elif any(kw in place_tags for kw in keywords):
+                            match_score += weight_val * 10.0
+                    
+                    # 2. Kiểm tra nếu là bạn đồng hành
+                    elif pref_key in ['Một mình', 'Cặp đôi', 'Gia đình', 'Nhóm bạn']:
+                        # Boost các địa điểm có tags chứa tên bạn đồng hành
+                        companion_lower = pref_key.lower()
+                        if companion_lower in place_category or companion_lower in place_tags:
+                            match_score += weight_val * 15.0
+                    
+                    # 3. Kiểm tra nếu là mức ngân sách
+                    elif pref_key in ['$', '$$', '$$$']:
+                        # Boost dựa trên sự phù hợp ngân sách nếu địa điểm có trường giá cả/budget
+                        place_budget = str(place.get("budget", "")).lower()
+                        if pref_key in place_budget or pref_key in place_tags:
+                            match_score += weight_val * 15.0
+
+                total_score = base_score + match_score
+                scored_places.append((place, total_score))
+
+            # Sắp xếp danh sách theo điểm số giảm dần
+            scored_places.sort(key=lambda x: x[1], reverse=True)
+            
+            # Trích xuất top places
+            final_places = [item[0] for item in scored_places[:limit]]
+            logger.info(f"✨ Đã chọn lọc thành công {len(final_places)} địa điểm Cold Start cá nhân hóa dựa trên sở thích.")
+            return final_places
+
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi tính toán Cold Start places: {e}")
+            return await self.get_trending_places(limit=limit)
+
     async def get_trending_places(self, limit: int = 20) -> List[Dict[str, Any]]:
         """
         [COLD START FALLBACK]
@@ -417,12 +531,12 @@ class AiService:
                         if len(places) >= self._COLD_START_THRESHOLD:
                             return places, "PERSONALIZED"
                         else:
-                            logger.warning(f"🧊 [COLD START] user='{user_id}'. Fallback → get_trending_places()")
-                            places = await self.get_trending_places(limit=20)
+                            logger.warning(f"🧊 [COLD START] user='{user_id}'. Fallback → get_cold_start_places()")
+                            places = await self.get_cold_start_places(user_id, limit=20)
                             return places, "COLD START"
                     except Exception as rec_err:
                         logger.warning(f"⚠️ Recommendation engine lỗi: {rec_err}. Kích hoạt Cold Start.")
-                        places = await self.get_trending_places(limit=20)
+                        places = await self.get_cold_start_places(user_id, limit=20)
                         return places, "COLD START"
                 else:
                     logger.info("👤 [ANONYMOUS] Không có user_id. Sử dụng Trending Places làm RAG context.")
