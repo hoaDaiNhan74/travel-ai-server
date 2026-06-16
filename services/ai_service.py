@@ -360,8 +360,6 @@ class AiService:
         [PLACEHOLDER] Hàm giả lập lấy dự báo thời tiết.
         Sau này có thể kết nối với OpenWeatherMap API.
         """
-        # Giả lập delay mạng
-        await asyncio.sleep(0.5)
         # Giả lập thời tiết ngẫu nhiên hoặc cứng
         return f"Dự báo thời tiết tại {destination} từ {start_date.strftime('%d/%m')} đến {end_date.strftime('%d/%m')}: Ban ngày trời nắng đẹp, nhiệt độ 28-32 độ C. Buổi chiều tối có thể có mưa rào nhẹ. Khuyên dùng trang phục thoáng mát và mang theo ô."
 
@@ -370,8 +368,6 @@ class AiService:
         [PLACEHOLDER] Hàm giả lập lấy sự kiện/lễ hội đang diễn ra.
         Sau này có thể kết nối với Ticketmaster hoặc Eventbrite API.
         """
-        # Giả lập delay mạng
-        await asyncio.sleep(0.5)
         # Giả lập sự kiện
         return f"Sự kiện nổi bật tại {destination}: Lễ hội ẩm thực đường phố đang diễn ra tại trung tâm thành phố vào các buổi tối cuối tuần. Tuần lễ nghệ thuật đương đại mở cửa miễn phí từ 9h-17h hàng ngày."
 
