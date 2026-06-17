@@ -394,15 +394,14 @@ class AiService:
                     
                     # 2. Kiểm tra nếu là bạn đồng hành
                     elif pref_key in ['Một mình', 'Cặp đôi', 'Gia đình', 'Nhóm bạn']:
-                        # Boost các địa điểm có tags chứa tên bạn đồng hành
                         companion_lower = pref_key.lower()
-                        if companion_lower in place_category or companion_lower in place_tags:
+                        place_suitable = [str(x).lower() for x in place.get("suitableFor", [])]
+                        if companion_lower in place_suitable or companion_lower in place_category or companion_lower in place_tags:
                             match_score += weight_val * 15.0
                     
                     # 3. Kiểm tra nếu là mức ngân sách
                     elif pref_key in ['$', '$$', '$$$']:
-                        # Boost dựa trên sự phù hợp ngân sách nếu địa điểm có trường giá cả/budget
-                        place_budget = str(place.get("budget", "")).lower()
+                        place_budget = str(place.get("budgetLevel", place.get("budget", ""))).lower()
                         if pref_key in place_budget or pref_key in place_tags:
                             match_score += weight_val * 15.0
 

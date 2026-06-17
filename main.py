@@ -180,40 +180,58 @@ async def health_check():
 )
 async def get_recommendations(user_id: str):
     """
-    Returns personalized destination recommendations for a given user_id
-    using the pre-loaded Two-Tower TensorFlow model.
+    Returns personalized destination recommendations for a given user_id.
+    Tries the pre-loaded Two-Tower TensorFlow model first. If user is new (Cold Start)
+    or the model is not loaded/fails, falls back to the user's survey preferences.
     """
-    if loaded_model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded. Server is not ready.")
-
     if not user_id or not user_id.strip():
         raise HTTPException(status_code=400, detail="user_id must not be empty.")
 
-    try:
-        # 1. Convert user_id string → TF constant tensor
-        input_tensor = tf.constant([user_id])
+    recommendations = []
+    is_personalized = False
 
-        # 2. Run inference (expects standard TFRS SavedModel export format)
-        scores, destination_ids = loaded_model(input_tensor)
+    # 1. Thử lấy gợi ý từ model Two-Tower
+    if loaded_model is not None:
+        try:
+            # Convert user_id string → TF constant tensor
+            input_tensor = tf.constant([user_id])
+            # Run inference
+            scores, destination_ids = loaded_model(input_tensor)
+            # Decode byte tensors → Python UTF-8 strings
+            raw_ids = destination_ids[0].numpy()
+            recommendations = [
+                dest_id.decode("utf-8") if isinstance(dest_id, bytes) else str(dest_id)
+                for dest_id in raw_ids
+            ]
+            if len(recommendations) >= 5:
+                is_personalized = True
+        except Exception as inf_err:
+            logger.warning(f"⚠️ Two-Tower inference error: {inf_err}. Falling back to cold start...")
 
-        # 3. Decode byte tensors → Python UTF-8 strings
-        raw_ids = destination_ids[0].numpy()
-        recommendations = [
-            dest_id.decode("utf-8") if isinstance(dest_id, bytes) else str(dest_id)
-            for dest_id in raw_ids
-        ]
+    # 2. Nếu model không sẵn sàng hoặc không đủ gợi ý (user mới), dùng Cold Start preferences
+    if not is_personalized:
+        logger.info(f"🧊 [COLD START] Generating preferences-based recommendations for user '{user_id}'...")
+        try:
+            cold_start_places = await ai_service.get_cold_start_places(user_id, limit=20)
+            recommendations = [place['id'] for place in cold_start_places]
+        except Exception as cs_err:
+            logger.error(f"❌ Cold start fallback error: {cs_err}")
 
-        logger.info(f"✅ Recommendations generated for user '{user_id}': {len(recommendations)} items")
+    # 3. Hàng phòng ngự cuối cùng: trả về địa điểm trending chung
+    if not recommendations:
+        try:
+            trending = await ai_service.get_trending_places(limit=20)
+            recommendations = [place['id'] for place in trending]
+        except Exception as trend_err:
+            logger.error(f"❌ Trending fallback error: {trend_err}")
 
-        return RecommendationResponse(
-            status="success",
-            user_id=user_id,
-            recommendations=recommendations[:10],  # Top 10
-        )
+    logger.info(f"✅ Recommendations generated for user '{user_id}': {len(recommendations)} items")
 
-    except Exception as e:
-        logger.error(f"❌ Inference error for user '{user_id}': {e}")
-        raise HTTPException(status_code=500, detail=f"Recommendation inference failed: {e}")
+    return RecommendationResponse(
+        status="success",
+        user_id=user_id,
+        recommendations=recommendations[:10],  # Top 10
+    )
 
 
 # ─── Backward-compatible alias ────────────────────────────────────────────────
