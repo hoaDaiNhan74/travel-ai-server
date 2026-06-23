@@ -186,7 +186,7 @@ class DestinationModel(tf.keras.Model):
             tf.keras.layers.Embedding(len(unique_categories) + 1, cfg.EMBEDDING_DIM)
         ])
         
-        self.tags_vectorizer = tf.keras.layers.TextVectorization()
+        self.tags_vectorizer = tf.keras.layers.TextVectorization(max_tokens=1000)
         self.tags_embedding = tf.keras.Sequential([
             self.tags_vectorizer,
             tf.keras.layers.Embedding(1000, cfg.EMBEDDING_DIM, mask_zero=True),

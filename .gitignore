@@ -5,3 +5,4 @@ serviceAccountKey.json
 logs/
 venv/
 uploads/
+two_tower_model_backups/
