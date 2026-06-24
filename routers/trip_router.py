@@ -166,6 +166,7 @@ async def join_trip(request: JoinTripRequest):
 
         # 2. Cập nhật member_ids
         member_ids = trip_data.get("member_ids", [])
+        old_members = list(member_ids)  # Lưu lại danh sách thành viên cũ
         if request.user_id not in member_ids:
             member_ids.append(request.user_id)
             ai_service._db.collection("trips").document(doc_id).update({
@@ -174,6 +175,42 @@ async def join_trip(request: JoinTripRequest):
             # Cập nhật data để trả về cho người dùng
             trip_data["member_ids"] = member_ids
             logger.info(f"👤 User {request.user_id} đã tham gia trip {doc_id}")
+
+            # 3. Gửi thông báo cho chủ sở hữu chuyến đi và các thành viên cũ
+            try:
+                from firebase_admin import firestore
+                
+                # Lấy tên người tham gia từ collection "users"
+                joiner_name = "Một người dùng"
+                user_doc = ai_service._db.collection("users").document(request.user_id).get()
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    joiner_name = user_data.get("name") or user_data.get("displayName") or "Một người dùng"
+                
+                owner_id = trip_data.get("userId")
+                destination = trip_data.get("destination", "chuyến đi")
+
+                # Tập hợp người nhận thông báo
+                recipients = set()
+                if owner_id and owner_id != request.user_id:
+                    recipients.add(owner_id)
+                for old_m in old_members:
+                    if old_m != request.user_id:
+                        recipients.add(old_m)
+
+                for r_id in recipients:
+                    notification_data = {
+                        "title": "Thành viên mới tham gia nhóm 👥",
+                        "body": f"{joiner_name} đã tham gia chuyến đi đến {destination}.",
+                        "type": "group_update",
+                        "timestamp": firestore.SERVER_TIMESTAMP,
+                        "isRead": False,
+                        "travelId": doc_id
+                    }
+                    ai_service._db.collection("users").document(r_id).collection("notifications").add(notification_data)
+                    logger.info(f"🔔 Đã tạo thông báo tham gia nhóm cho user {r_id}")
+            except Exception as notif_err:
+                logger.error(f"⚠️ Lỗi khi tạo thông báo tham gia chuyến đi {doc_id}: {notif_err}")
         else:
             logger.info(f"👤 User {request.user_id} đã là thành viên của trip {doc_id}")
 
