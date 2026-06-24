@@ -178,6 +178,11 @@ async def health_check():
     response_model=RecommendationResponse,
     tags=["Recommendations"],
 )
+@app.get(
+    "/api/recommend/{user_id}",
+    response_model=RecommendationResponse,
+    tags=["Recommendations"],
+)
 async def get_recommendations(user_id: str):
     """
     Returns personalized destination recommendations for a given user_id.
@@ -190,8 +195,20 @@ async def get_recommendations(user_id: str):
     recommendations = []
     is_personalized = False
 
-    # 1. Thử lấy gợi ý từ model Two-Tower
-    if loaded_model is not None:
+    # Kiểm tra xem user có tương tác nào chưa để xác định Cold Start
+    is_cold_start = True
+    if db is not None:
+        try:
+            # Truy vấn xem user có tương tác nào trong user_interactions không
+            inter_docs = db.collection("user_interactions").where("userId", "==", user_id).limit(3).stream()
+            interactions_list = list(inter_docs)
+            if len(interactions_list) >= 3:
+                is_cold_start = False
+        except Exception as db_err:
+            logger.warning(f"⚠️ Error checking user interactions for {user_id}: {db_err}. Defaulting to Cold Start.")
+
+    # 1. Thử lấy gợi ý từ model Two-Tower (chỉ khi không phải Cold Start và model đã load)
+    if not is_cold_start and loaded_model is not None:
         try:
             # Convert user_id string → TF constant tensor
             input_tensor = tf.constant([user_id])
