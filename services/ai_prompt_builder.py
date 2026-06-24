@@ -60,7 +60,7 @@ class AiPromptBuilder:
 
             # 2. Tách dữ liệu: Must visit vs Suggestions
             must_visit_ids = request.mustVisitPlaceIds or []
-            must_visit_places = [d for d in destination_pool if d.get('id') in must_visit_ids]
+            must_visit_places = [d for d in all_destinations if d.get('id') in must_visit_ids]
             suggestion_pool = [d for d in destination_pool if d.get('id') not in must_visit_ids]
 
             # Sort theo trendingScore giảm dần, sau đó là rating

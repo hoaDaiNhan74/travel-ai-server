@@ -550,6 +550,28 @@ class AiService:
             )
 
             # ═══════════════════════════════════════════════════════
+            # BƯỚC 1.5: BỔ SUNG ĐỊA ĐIỂM BẮT BUỘC BỊ THIẾU
+            # ═══════════════════════════════════════════════════════
+            must_visit_ids = request.mustVisitPlaceIds or []
+            if must_visit_ids and self._db:
+                existing_ids = {p.get('id') for p in raw_places if p.get('id')}
+                missing_ids = [m_id for m_id in must_visit_ids if m_id not in existing_ids]
+                if missing_ids:
+                    logger.info(f"🔍 RAG: Phát hiện {len(missing_ids)} địa điểm bắt buộc bị thiếu trong raw_places. Đang tải trực tiếp từ Firestore...")
+                    for dest_id in missing_ids:
+                        try:
+                            doc = self._db.collection("destinations").document(dest_id).get()
+                            if doc.exists:
+                                place_data = doc.to_dict()
+                                place_data['id'] = dest_id
+                                raw_places.append(place_data)
+                                logger.info(f"✅ Đã bổ sung địa điểm bắt buộc: {place_data.get('name')} (ID: {dest_id})")
+                            else:
+                                logger.warning(f"⚠️ Địa điểm bắt buộc '{dest_id}' không tồn tại trong Firestore.")
+                        except Exception as e:
+                            logger.error(f"❌ Lỗi khi tải địa điểm bắt buộc '{dest_id}' từ Firestore: {e}")
+
+            # ═══════════════════════════════════════════════════════
             # BƯỚC 2: XÂY DỰNG RAG CONTEXT
             # ═══════════════════════════════════════════════════════
             rag_context: str = AiPromptBuilder.prepare_optimal_rag_context(request, raw_places)
