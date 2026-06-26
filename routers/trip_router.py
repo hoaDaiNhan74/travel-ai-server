@@ -201,7 +201,7 @@ async def join_trip(request: JoinTripRequest):
                 for r_id in recipients:
                     notification_data = {
                         "title": "Thành viên mới tham gia nhóm 👥",
-                        "body": f"{joiner_name} đã tham gia chuyến đi đến {destination}.",
+                        "body": f"<b>{joiner_name}</b> đã tham gia chuyến đi đến <b>{destination}</b>.",
                         "type": "group_update",
                         "timestamp": firestore.SERVER_TIMESTAMP,
                         "isRead": False,
